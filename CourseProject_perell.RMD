@@ -1,0 +1,130 @@
+Course Project Assignment (Practical Machine Learning JHU Coursera)
+===================================================================
+
+0)Load libraries (dependencies) 
+
+
+```{r,results='hide'}
+library(caret)
+library(randomForest)
+library(rattle)
+library(rpart)
+
+#setwd("/Users/XXXman/Dropbox/PROJECTS/PredictiveModelling_Coursera/predModlJHU")
+```
+
+Downloaded provided files (training and tesing datasets). 
+Then I load them. 
+
+```{r}
+trainingS = read.csv("pml-training.csv", na.strings=c("", "NA", "NULL"))
+testingS = read.csv("pml-testing.csv", na.strings=c("", "NA", "NULL"))
+```
+
+1) Cleaning data: 
+a) Remove variables with too many NA's (mostly blank)
+b) Remove all other unrelevant variables and user name, timestamps and window.
+
+```{r}
+#a
+trainingC <- trainingS[ , colSums(is.na(trainingS)) == 0]
+#dim(trainingC) [1] 19622 60
+#b
+remove = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+trainingCl <- trainingC[, -which(names(trainingC) %in% remove)]
+#dim(trainingCl) [1] 19622 53
+```
+
+c)Use nearZeroVar() from caret to detect vars that have low variance
+d)Use findCorrelation to pinpoint and remove varibales with high correlation and remove them.
+
+```{r,results='hide'}
+#c
+zvar= nearZeroVar(trainingCl[sapply(trainingCl, is.numeric)], saveMetrics = TRUE)
+trainingZvar = trainingCl[,zvar[, 'nzv']==0]
+#dim(trainingZvar) [1]19622 53
+
+#d
+corrT <-cor(na.omit(trainingZvar[sapply(trainingZvar, is.numeric)]))
+# dim(corrT) [1] 52 52
+remC = findCorrelation(corrT, cutoff = .90, verbose = TRUE)
+trainingClean = trainingZvar[,-remC]
+dim(trainingClean)
+
+```
+
+Ok then we are set to split for training and testing (19622 samples and 46 vars)
+Training set: 14718 samples
+Testing set: 4904
+
+```{r}
+index <- createDataPartition(y=trainingClean$classe, p=0.7, list=FALSE)
+training <- trainingClean[index,]
+testing <- trainingClean[-index,]
+dim(training)
+dim(testing)
+```
+
+2) Ready to perform the analysis:
+a) Rpart model classification tree
+b) Error rate of rpart model on the testing data (0.58).Poor result, better check something else!!
+
+```{r}
+#a)
+modelRp <- train(classe ~ .,method="rpart",data=training)
+print(modelRp$finalModel)
+#Print the output classification tree
+fancyRpartPlot(modelRp$finalModel)
+#b)
+predRp<-predict(modelRp,testing)
+pm<- with(testing,table(predRp,classe))
+errorRate <- sum(diag(pm))/sum(as.vector(pm))
+errorRate
+```
+
+Random forest will use many trees and find how to reduce the variance: 
+a)Random forest fitting (estimate error rate: OOB 0.76%, now see with testing ). 
+c) Error rate Random Forest check with testing data: 0.994. Very accurate!
+
+```{r}
+#b)
+set.seed(12345)
+rfTr <- randomForest(classe~.,data=training,ntree=150, importance=TRUE)
+rfTr
+
+#Error 
+#plot(rfTr,log="y")
+#See variables and its impact on the prediction
+varImpPlot(rfTr)
+
+#c) Error rate with testing set
+
+predTest <- predict(rfTr, newdata=testing,type="class")
+pm <-with(testing,table(predTest,classe))
+errorRate<-sum(diag(pm))/sum(as.vector(pm)) 
+errorRate
+
+```
+
+Conclusion 
+-----------
+
+Random forest model is very accurate.  
+
+Submission
+------------
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+answers <- predict(rfTr, testingS)
+answers
+
+#pml_write_files(answers)
+
+```
